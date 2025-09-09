@@ -1,4 +1,4 @@
-package com.example.injectionapp;
+package com.nachozgames.xperiaplaycontroller;
 
 import android.app.Service;
 import android.app.Notification;
@@ -11,18 +11,21 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.Context;
 
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
 import java.util.Set;
 import java.util.UUID;
 
 public class TouchInjectService extends Service {
 
     private static final String TAG = "BluetoothClient";
-    private static final String DEVICE_NAME = "ESP32_BT_SENDER";
+    private static final String DEVICE_NAME = "Xperia Play Controller";
     private static final UUID SPP = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
 
     private BluetoothAdapter adapter;
@@ -166,65 +169,144 @@ public class TouchInjectService extends Service {
         final InputStream in = s.getInputStream();
         final OutputStream out = s.getOutputStream();
 
-        // Example: nudge the ESP32 once to confirm link (optional)
-        try { out.write("HELLO\n".getBytes("UTF-8")); out.flush(); } catch (Throwable ignored) {}
-
         readerThread = new Thread(() -> {
-            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY);
 
             try{
-                byte[] buf = new byte[256];
+                byte[] buf = new byte[32];
                 Process su = Runtime.getRuntime().exec("su");
                 DataOutputStream os = new DataOutputStream(su.getOutputStream());
                 Gamepad gamepad = new Gamepad();
                 Gamepad prevGamepad = new Gamepad();
                 long lastBatchMs = 0;
+                long lastRumble = 0;
+                long lastRumbleDur = 0;
+                boolean rumble = false;
+                boolean touch_down = false;
+                BufferedReader br = new BufferedReader(new FileReader("/sys/class/timed_output/vibrator/enable"), 64);
 
-                while (!Thread.currentThread().isInterrupted()) {
+                while (!Thread.currentThread().isInterrupted())
+                {
                     try {
-                        int n = in.read(buf);
-                        if (n <= 0) break;
-                        // Parse your payload and dispatch to input injector here
-                        // Example: if first byte == 0x01 => inject DPAD_UP, etc.
-                        //handlePayload(buf, n);
-                        int count = Math.min(n, 18);
-                        StringBuilder batch = new StringBuilder(256);
+                        String line = br.readLine();
+                        int dur = 0;
 
-                        for (int i = 0; i < count; i++) {
-                            boolean newState = (buf[i] == 1);
-                            boolean oldState = gamepad.buttons[i];
+                        if(line!=null)
+                        {
+                            dur =  Integer.parseInt(line);
+                        }
 
-                            prevGamepad.buttons[i] = oldState;
-                            gamepad.buttons[i] = newState;
+                        if (dur>0)
+                        {
+                            if(!rumble || dur>=lastRumbleDur-(System.currentTimeMillis()-lastRumble))
+                            {
+                                rumble = true;
+                                lastRumble = System.currentTimeMillis();
+                                lastRumbleDur = dur;
+                                try {
+                                    byte[] bytes = ByteBuffer.allocate(512).putInt(dur).array();
+                                    out.write(bytes);
+                                    out.flush();
+                                    //Log.i(TAG, "Sent rumble message");
+                                } catch (Throwable ignored) {
 
-                            if (newState != oldState) {
-                                int linuxKey = gamepad.scancode[i]; // must be Linux input keycode
-                                int value = newState ? 1 : 0;
-                                batch.append("sendevent /dev/input/event4 1 ")
-                                        .append(linuxKey).append(' ').append(value).append('\n');
+                                }
                             }
                         }
+                        else
+                            rumble = false;
 
-                        long now = System.currentTimeMillis();
-                        if (batch.length() > 0 && (now - lastBatchMs >= 10)) {
-                            batch.append("sendevent /dev/input/event4 0 0 0\n");
-                            os.writeBytes(batch.toString());
-                            os.flush();
-                            lastBatchMs = now;
+                        int avail = in.available();
+                        if (avail > 0)
+                        {
+                            //Log.i(TAG, "Received response");
+                            int n = in.read(buf);
+                            if (n <= 0) break;
+
+                            StringBuilder batch = new StringBuilder(256);
+
+                            boolean keyPressed = false;
+
+                            for (int i = 0; i < 16; i++) {
+                                boolean newState = (buf[i] == 1);
+                                boolean oldState = gamepad.buttons[i];
+
+                                prevGamepad.buttons[i] = oldState;
+                                gamepad.buttons[i] = newState;
+
+                                if (newState != oldState) {
+                                    int linuxKey = gamepad.scancode[i]; // must be Linux input keycode
+                                    int value = newState ? 1 : 0;
+
+                                    Log.i(TAG, "Button received: " + Integer.toString(i));
+
+                                    switch (gamepad.eventcode[i]) {
+                                        case 1:
+                                            break;
+
+                                        case 2:
+                                            batch.append("sendevent /dev/input/event2 4 4 ").append(gamepad.scancode[i] == gamepad.BUTTON_SELECT ? 58 : 59).append(' ').append('\n');
+                                            batch.append("sendevent /dev/input/event2 1 ").append(linuxKey).append(' ').append(value).append('\n');
+                                            batch.append("sendevent /dev/input/event2 0 0 0 \n");
+                                            break;
+
+                                        case 5:
+                                            batch.append("sendevent /dev/input/event5 1 ").append(linuxKey).append(' ').append(value).append('\n');
+                                            batch.append("sendevent /dev/input/event5 0 0 0\n");
+                                            break;
+                                    }
+                                    keyPressed = true;
+                                }
+                            }
+
+                            //Received touch input 1
+                            if(buf[16]==1)
+                            {
+                                int touch_x = ((buf[18]&0xFF)<<8)|(buf[17]&0xFF);
+                                touch_x = (int)(((float)touch_x/1919.0)*966.0);
+                                int touch_y = ((buf[20]&0xFF)<<8)|(buf[19]&0xFF);
+                                touch_y = (int)(((float)touch_y/941.0)*360.0);
+                                Log.i(TAG, "Received touch: "+Integer.toString(touch_x)+","+Integer.toString(touch_y));
+
+                                if(!touch_down)
+                                {
+                                    batch.append(InjectTouchDown(touch_x, touch_y));
+                                    touch_down = true;
+                                }
+                                else
+                                {
+                                    batch.append(InjectTouchMove(touch_x, touch_y));
+                                }
+                            }
+                            else if(touch_down)
+                            {
+                                touch_down = false;
+                                batch.append(InjectTouchUp());
+                            }
+
+                            if (batch.length() > 0) {
+                                os.writeBytes(batch.toString());
+                                os.flush();
+                                //Log.i(TAG, "Batch submitted");
+                            }
                         }
-
-                    } catch (IOException e) {
+                    }
+                    catch(IOException e)
+                    {
+                        e.printStackTrace();
                         break;
                     }
 
-                    Thread.sleep(10);
+                    Thread.sleep(2);
                 }
-                closeQuietly(socket);
-                stopSelf();
+                br.close();
             }
             catch (Exception e) {
                 e.printStackTrace();
             }
+
+            closeQuietly(socket);
+            stopSelf();
         }, "bt-reader");
         readerThread.start();
 
@@ -254,6 +336,36 @@ public class TouchInjectService extends Service {
 
     private static void closeQuietly(Thread t) {
         if (t != null) try { t.interrupt(); } catch (Exception ignored) {}
+    }
+
+    private String InjectTouchDown(int touch_x, int touch_y)
+    {
+        StringBuilder batch = new StringBuilder(256);
+        batch.append("sendevent /dev/input/event4 2 3 57 0\n");
+        batch.append("sendevent /dev/input/event2 3 53 ").append(touch_x).append("\n");
+        batch.append("sendevent /dev/input/event2 3 54 ").append(touch_y).append("\n");
+        batch.append("sendevent /dev/input/event2 3 58 80\n");
+        batch.append("sendevent /dev/input/event2 0 2 0\n");
+        batch.append("sendevent /dev/input/event2 0 0 0\n");
+        return batch.toString();
+    }
+
+    private String InjectTouchMove(int touch_x, int touch_y)
+    {
+        StringBuilder batch = new StringBuilder(256);
+        batch.append("sendevent /dev/input/event2 3 53 ").append(touch_x).append("\n");
+        batch.append("sendevent /dev/input/event2 3 54 ").append(touch_y).append("\n");
+        batch.append("sendevent /dev/input/event2 0 2 0\n");
+        batch.append("sendevent /dev/input/event2 0 0 0\n");
+        return batch.toString();
+    }
+    private String InjectTouchUp()
+    {
+        StringBuilder batch = new StringBuilder(256);
+        batch.append("sendevent /dev/input/event4 2 3 57 -1\n");
+        batch.append("sendevent /dev/input/event2 0 2 0\n");
+        batch.append("sendevent /dev/input/event2 0 0 0\n");
+        return batch.toString();
     }
 
     // ===== Example sendevent helper (root shell kept open elsewhere) =====

@@ -1,4 +1,4 @@
-package com.example.injectionapp;
+package com.nachozgames.xperiaplaycontroller;
 
 import android.app.Activity;
 import android.content.Intent;

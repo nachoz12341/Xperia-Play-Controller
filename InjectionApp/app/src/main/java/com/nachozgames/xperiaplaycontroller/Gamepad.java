@@ -1,4 +1,4 @@
-package com.example.injectionapp;
+package com.nachozgames.xperiaplaycontroller;
 
 public class Gamepad {
     boolean[] buttons;
@@ -11,14 +11,35 @@ public class Gamepad {
             307,    //Square
             308,    //Triangle
             305,    //Circle
-             28,    //Start
+            28,    //Start
             314,    //Select
             310,    //Shoulder L
             311,    //Shoulder R
             0,      //Back
             0,      //Home
             0,      //Menu
-            0,      //Search
+            219,      //Search
+            0,      //Vol +
+            0       //Vol -
+    };
+
+    int[] eventcode = {
+            5,    //Dpad up
+            5,    //Dpad down
+            5,    //Dpad left
+            5,    //Dpad right
+            5,    //Cross
+            5,    //Square
+            5,    //Triangle
+            5,    //Circle
+            2,    //Start
+            2,    //Select
+            5,    //Shoulder L
+            5,    //Shoulder R
+            1,      //Back
+            1,      //Home
+            1,      //Menu
+            1,      //Search
             0,      //Vol +
             0       //Vol -
     };

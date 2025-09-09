@@ -1,12 +1,12 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace 'com.example.injectionapp'
+    namespace 'com.nachozgames.xperiaplaycontroller'
     compileSdk 30
     buildToolsVersion "31.0.0"
 
     defaultConfig {
-        applicationId "com.example.injectionapp"
+        applicationId "com.nachozgames.xperiaplaycontroller"
         minSdk 9
         targetSdk 10
         versionCode 1
